@@ -1,0 +1,4 @@
+export const LLM_PROVIDER = 'LLM_PROVIDER';
+export const OPENAI_CLIENT = 'OPENAI_CLIENT';
+export const OPENAI_MODEL = 'OPENAI_MODEL';
+export const COST_CALCULATOR = 'COST_CALCULATOR';

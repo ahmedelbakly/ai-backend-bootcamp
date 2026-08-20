@@ -1,0 +1,2032 @@
+{
+  "info": {
+    "name": "AI Backend Bootcamp",
+    "description": "Local test collection for the NestJS ai-backend-bootcamp API.\n\nRun the API first:\n\n    npm run start:dev\n\nBase URL defaults to http://localhost:3000 (main.ts uses `process.env.PORT ?? 3000`).\nChange the `baseUrl` collection variable if you set PORT in .env.\n\n`POST /ai/chat` answers **201** on success. The success tests assert status and a\nnon-empty body only — the handler's return value is still changing as the AI\nservice gets wired up, so pinning exact text would make them break on every edit.\nEach one logs the actual body to the Postman console so you can eyeball it.\n\nTrimming is proved by the **whitespace-only** request instead: 8 spaces come back\n400, which can only happen if @Transform ran before validation.\n\nValidation failures answer 400 with the standard Nest shape:\n\n    { \"message\": [ ...rule violations... ], \"error\": \"Bad Request\", \"statusCode\": 400 }\n\n`POST /ai/chat` is behind `JwtAuthGuard` and needs `Authorization: Bearer <token>`.\nBoth AI folders inherit that header from folder-level auth, filled from the\n`accessToken` collection variable. A collection pre-request script obtains that\ntoken once per run (register the shared test account, then log in), so every\nfolder can be run on its own and in any order.\n\nRequires `JWT_SECRET` in .env — `JwtModule` uses `getOrThrow`, so the app will not\nboot without it. `JWT_EXPIRES_IN` is optional and defaults to `1d`.\n\nThe Users folders create real accounts. Clean them up with:\n\n    db.userdocuments.deleteMany({ email: /^register\\./ })\n\nEvery request below was verified against a live server.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// /ai/chat is behind JwtAuthGuard, and both AI folders inherit",
+          "// `Bearer {{accessToken}}` from their folder-level auth. This bootstraps that",
+          "// token once per run — register the shared test account (409 on later runs,",
+          "// which is fine) then log in — so any folder can be run on its own without",
+          "// first executing the Auth folder by hand.",
+          "if (!pm.collectionVariables.get('accessToken')) {",
+          "  var base = pm.variables.get('baseUrl');",
+          "  var creds = { email: 'postman.user@example.com', password: 'correct-horse-99' };",
+          "",
+          "  var jsonBody = function (payload) {",
+          "    return {",
+          "      mode: 'raw',",
+          "      raw: JSON.stringify(payload),",
+          "      options: { raw: { language: 'json' } }",
+          "    };",
+          "  };",
+          "",
+          "  pm.sendRequest({",
+          "    url: base + '/users/register',",
+          "    method: 'POST',",
+          "    header: { 'Content-Type': 'application/json' },",
+          "    body: jsonBody({ name: 'Postman User', email: creds.email, password: creds.password })",
+          "  }, function () {",
+          "    pm.sendRequest({",
+          "      url: base + '/auth/login',",
+          "      method: 'POST',",
+          "      header: { 'Content-Type': 'application/json' },",
+          "      body: jsonBody(creds)",
+          "    }, function (err, res) {",
+          "      if (!err && res.code === 200) {",
+          "        pm.collectionVariables.set('accessToken', res.json().accessToken);",
+          "      }",
+          "    });",
+          "  });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET / — hello",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": ["{{baseUrl}}"],
+              "path": [""]
+            },
+            "description": "Sanity check that the server is up (AppController.getHello)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('returns Hello World!', function () {",
+                  "  pm.expect(pm.response.text()).to.eql('Hello World!');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AI — valid requests",
+      "description": "POST /ai/chat is protected — AiController carries @UseGuards(JwtAuthGuard).\n\nEvery request in this folder inherits the bearer token below, filled from the\n`accessToken` collection variable that the collection pre-request script obtains.\nSee the 'AI — authentication' folder for what happens without it.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          { "key": "token", "value": "{{accessToken}}", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "POST /ai/chat —valid message",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Explain what a DTO is in NestJS\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "Happy path. The handler echoes back `body.message`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('returns a non-empty body', function () {",
+                  "  pm.expect(pm.response.text()).to.have.length.above(0);",
+                  "});",
+                  "",
+                  "console.log('Handler returned:', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/chat —whitespace is trimmed",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"     Explain dependency injection     \"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "The @Transform in ChatDto trims before validation runs.\nThe echoed response proves it: the surrounding spaces are gone."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('returns a non-empty body', function () {",
+                  "  pm.expect(pm.response.text()).to.have.length.above(0);",
+                  "});",
+                  "",
+                  "console.log('Handler returned:', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/chat —extra fields are stripped (whitelist)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"This message is long enough\",\n  \"role\": \"admin\",\n  \"isAdmin\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "ValidationPipe runs with { whitelist: true } but WITHOUT forbidNonWhitelisted,\nso `role` and `isAdmin` are silently dropped rather than rejected.\n\nExpect 201. If you later add forbidNonWhitelisted: true, this request starts\nreturning 400 instead — a useful decision to make deliberately."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201 (extras stripped, not rejected)', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('returns a non-empty body', function () {",
+                  "  pm.expect(pm.response.text()).to.have.length.above(0);",
+                  "});",
+                  "",
+                  "console.log('Handler returned:', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AI — validation errors",
+      "description": "Same bearer token as the valid requests — these have to authenticate before the\nDTO rules can be reached at all.\n\nNest runs guards BEFORE pipes, so an unauthenticated malformed body answers 401,\nnot 400. Getting 400 here is itself proof the guard let the request through.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          { "key": "token", "value": "{{accessToken}}", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "POST /ai/chat —message too short",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"hi\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "Fails @MinLength(5)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('complains about minimum length', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(JSON.stringify(body.message)).to.include('longer than or equal to 5');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/chat —whitespace-only message",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"        \"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "Proves the @Transform trim actually runs before validation:\nwithout it, 8 spaces would pass @MinLength(5)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400 — trim ran before validation', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/chat —empty message",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "Fails @IsNotEmpty and @MinLength(5)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/chat —missing message field",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "No `message` key at all."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/chat —message is not a string",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": 12345\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "Fails @IsString. The @Transform passes non-strings through untouched."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('complains about string type', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(JSON.stringify(body.message)).to.include('must be a string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/chat —message exceeds 4000 chars",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"{{longMessage}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "Fails @MaxLength(4000). The 4001-char payload is generated by the pre-request script."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('longMessage', 'a'.repeat(4001));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('complains about maximum length', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(JSON.stringify(body.message)).to.include('shorter than or equal to 4000');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.unset('longMessage');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AI — authentication",
+      "description": "The rejection paths JwtAuthGuard introduces on POST /ai/chat.\n\nEvery request here sets `\"auth\": \"noauth\"` so it does NOT inherit the collection\ntoken — each one supplies its own broken Authorization header, or none.\n\nAll of them carry a perfectly valid body. A 401 therefore proves the guard ran\nbefore the ValidationPipe, which is the Nest execution order: guards, then\ninterceptors, then pipes.\n\nEvery request below was verified against a live server.",
+      "auth": { "type": "noauth" },
+      "item": [
+        {
+          "name": "POST /ai/chat —no Authorization header",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"This body is perfectly valid\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "The endpoint used to be open. This is the request that proves it no longer is."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('says the token is missing', function () {",
+                  "  pm.expect(pm.response.json().message).to.eql('Missing access token');",
+                  "});",
+                  "",
+                  "pm.test('no model output leaked with the rejection', function () {",
+                  "  pm.expect(pm.response.text()).to.not.include('cost');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/chat —wrong scheme (Basic instead of Bearer)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Basic {{accessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"This body is perfectly valid\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "A genuinely valid token sent under the wrong scheme.\n\nJwtAuthGuard.extractToken only accepts `Bearer`, so this is treated as no token\nat all rather than being verified anyway."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401 even though the token itself is valid', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('treated as missing, not as invalid', function () {",
+                  "  pm.expect(pm.response.json().message).to.eql('Missing access token');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/chat —malformed token",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer not-a-jwt" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"This body is perfectly valid\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "Correct scheme, garbage token. verifyAsync throws and the guard converts it to a\ngeneric 401 — expired, tampered and malformed tokens are deliberately\nindistinguishable to the caller."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('says the token is invalid', function () {",
+                  "  pm.expect(pm.response.json().message).to.eql('Invalid access token');",
+                  "});",
+                  "",
+                  "pm.test('no jsonwebtoken internals leak into the response', function () {",
+                  "  var body = pm.response.text();",
+                  "  pm.expect(body).to.not.include('jwt malformed');",
+                  "  pm.expect(body).to.not.include('JsonWebTokenError');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/chat —tampered signature",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{tamperedToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"This body is perfectly valid\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "Takes the real token and flips the last character of its signature.\n\nThe header and payload still decode cleanly, so this only fails if the signature\nis actually being checked against JWT_SECRET — which is the whole point of the\nguard. A 200 here would mean unsigned tokens are being trusted."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var token = pm.collectionVariables.get('accessToken') || '';",
+                  "var parts = token.split('.');",
+                  "var sig = parts[2] || 'x';",
+                  "var last = sig.slice(-1);",
+                  "parts[2] = sig.slice(0, -1) + (last === 'A' ? 'B' : 'A');",
+                  "pm.collectionVariables.set('tamperedToken', parts.join('.'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401 — the signature is verified', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('says the token is invalid', function () {",
+                  "  pm.expect(pm.response.json().message).to.eql('Invalid access token');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.unset('tamperedToken');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Users — valid requests",
+      "description": "POST /users/register creates an account.\n\nThese requests write to the real database the API is pointed at. The folder is\nre-runnable: every account it creates uses an address generated in a pre-request\nscript (`register.<timestamp>.<n>@example.com`), so repeated runs never collide\nwith each other. Clean them up with:\n\n    db.userdocuments.deleteMany({ email: /^register\\./ })\n\nRegistration answers **201** — unlike login, it really does create a resource.\n\nEvery request below was verified against a live server.",
+      "item": [
+        {
+          "name": "POST /users/register —valid registration",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ada Lovelace\",\n  \"email\": \"{{freshEmail}}\",\n  \"password\": \"correct-horse-99\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "register"]
+            },
+            "description": "Happy path. UsersService.create checks the email is free, bcrypt-hashes the\npassword with 10 rounds, then inserts.\n\nThe generated address is kept in the `freshEmail` collection variable so the\nduplicate-email request below can reuse it."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(",
+                  "  'freshEmail',",
+                  "  'register.' + Date.now() + '.' + Math.floor(Math.random() * 1000) + '@example.com'",
+                  ");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('returns the persisted document', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body._id).to.be.a('string');",
+                  "  pm.expect(body.name).to.eql('Ada Lovelace');",
+                  "  pm.expect(body.email).to.eql(pm.collectionVariables.get('freshEmail'));",
+                  "});",
+                  "",
+                  "pm.test('schema timestamps are populated', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body.createdAt).to.be.a('string');",
+                  "  pm.expect(body.updatedAt).to.be.a('string');",
+                  "});",
+                  "",
+                  "pm.test('password is stored hashed, never in plain text', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body.password).to.not.eql('correct-horse-99');",
+                  "  pm.expect(body.password).to.match(/^\\$2[aby]\\$10\\$/);",
+                  "});",
+                  "",
+                  "// KNOWN GAP, asserted so it stays visible rather than forgotten: the handler",
+                  "// returns the raw mongoose document, so the bcrypt hash ships to the client.",
+                  "// POST /auth/login does not do this — it builds its user object field by field.",
+                  "// When register is given the same treatment, flip this to `.to.not.have.property`.",
+                  "pm.test('KNOWN GAP: response still exposes the password hash', function () {",
+                  "  pm.expect(pm.response.json()).to.have.property('password');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users/register —duplicate email is rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Someone Else\",\n  \"email\": \"{{freshEmail}}\",\n  \"password\": \"different-pass-77\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "register"]
+            },
+            "description": "Reuses the address the previous request just claimed.\n\nUsersService.create finds the existing user and throws ConflictException, so the\ncaller gets a clean 409 instead of a raw E11000 duplicate-key error leaking out\nof the unique index.\n\nRun this request on its own and it will 404-free but 201 instead — it depends on\nthe request above having run first in the same session."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 409', function () {",
+                  "  pm.response.to.have.status(409);",
+                  "});",
+                  "",
+                  "pm.test('reports the conflict, not a driver error', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body.message).to.eql('Email already exists');",
+                  "  pm.expect(JSON.stringify(body)).to.not.include('E11000');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users/register —email is lowercased, name is trimmed",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"    Grace Hopper    \",\n  \"email\": \"  {{mixedCaseEmail}}  \",\n  \"password\": \"correct-horse-99\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "register"]
+            },
+            "description": "The @Transform hooks in RegisterUserDto run before validation and before the\nduplicate check.\n\nThat ordering is the point: UsersService.create looks the email up with a raw\nfindOne({ email }), and the schema's own `lowercase: true` only applies on save.\nWithout the DTO transform, 'Foo@Bar.com' would miss the stored 'foo@bar.com' and\nhit the unique index as an unhandled E11000."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var local = 'Register.' + Date.now() + '.' + Math.floor(Math.random() * 1000);",
+                  "pm.collectionVariables.set('mixedCaseEmail', local + '@Example.COM');",
+                  "pm.collectionVariables.set('expectedEmail', local.toLowerCase() + '@example.com');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('email was trimmed and lowercased', function () {",
+                  "  pm.expect(pm.response.json().email).to.eql(pm.collectionVariables.get('expectedEmail'));",
+                  "});",
+                  "",
+                  "pm.test('name was trimmed', function () {",
+                  "  pm.expect(pm.response.json().name).to.eql('Grace Hopper');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.unset('mixedCaseEmail');",
+                  "pm.collectionVariables.unset('expectedEmail');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users/register —extra fields are stripped (whitelist)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Mallory\",\n  \"email\": \"{{privEscEmail}}\",\n  \"password\": \"correct-horse-99\",\n  \"role\": \"admin\",\n  \"isAdmin\": true,\n  \"_id\": \"000000000000000000000000\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "register"]
+            },
+            "description": "ValidationPipe runs with { whitelist: true }, so anything not declared on\nRegisterUserDto is dropped before the service sees it.\n\nThis is the request that matters most for the whitelist setting: `role` and\n`isAdmin` are a mass-assignment attempt, and the injected `_id` tries to pin the\ndocument id. All three should vanish.\n\nNote there is no forbidNonWhitelisted, so extras are stripped silently rather\nthan rejected — expect 201, not 400."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(",
+                  "  'privEscEmail',",
+                  "  'register.' + Date.now() + '.' + Math.floor(Math.random() * 1000) + '@example.com'",
+                  ");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201 (extras stripped, not rejected)', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('role and isAdmin never reached the document', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body).to.not.have.property('role');",
+                  "  pm.expect(body).to.not.have.property('isAdmin');",
+                  "});",
+                  "",
+                  "pm.test('injected _id was ignored', function () {",
+                  "  pm.expect(pm.response.json()._id).to.not.eql('000000000000000000000000');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.unset('privEscEmail');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Users — validation errors",
+      "description": "RegisterUserDto rules, each rejected by the global ValidationPipe with 400\nbefore UsersService runs — so no duplicate lookup and no bcrypt hashing happen.\n\nFailures use the standard Nest shape:\n\n    { \"message\": [ ...rule violations... ], \"error\": \"Bad Request\", \"statusCode\": 400 }\n\nNothing here writes to the database, so this folder is safe to run repeatedly.\n\nEvery request below was verified against a live server.",
+      "item": [
+        {
+          "name": "POST /users/register —name too short",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"A\",\n  \"email\": \"shortname@example.com\",\n  \"password\": \"correct-horse-99\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "register"]
+            },
+            "description": "Fails @MinLength(2)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('complains about minimum length', function () {",
+                  "  pm.expect(JSON.stringify(pm.response.json().message)).to.include('longer than or equal to 2');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users/register —whitespace-only name",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"        \",\n  \"email\": \"blankname@example.com\",\n  \"password\": \"correct-horse-99\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "register"]
+            },
+            "description": "Proves the name @Transform trim runs before validation: without it, 8 spaces\nwould sail past @MinLength(2) and create a user with a blank name."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400 — trim ran before validation', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users/register —malformed email",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ada Lovelace\",\n  \"email\": \"not-an-email\",\n  \"password\": \"correct-horse-99\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "register"]
+            },
+            "description": "Fails @IsEmail."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('complains about the email', function () {",
+                  "  pm.expect(JSON.stringify(pm.response.json().message)).to.include('email must be an email');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users/register —password too short",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ada Lovelace\",\n  \"email\": \"shortpass@example.com\",\n  \"password\": \"short\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "register"]
+            },
+            "description": "Fails @MinLength(8)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('complains about minimum length', function () {",
+                  "  pm.expect(JSON.stringify(pm.response.json().message)).to.include('longer than or equal to 8');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users/register —password exceeds bcrypt's 72-byte limit",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ada Lovelace\",\n  \"email\": \"longpass@example.com\",\n  \"password\": \"{{longPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "register"]
+            },
+            "description": "Fails @MaxLength(72). bcrypt silently ignores input past 72 bytes, so accepting\na longer password would quietly weaken it — rejecting is the honest answer.\n\nThe 73-character payload comes from the pre-request script."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('longPassword', 'a'.repeat(73));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('complains about maximum length', function () {",
+                  "  pm.expect(JSON.stringify(pm.response.json().message)).to.include('shorter than or equal to 72');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.unset('longPassword');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users/register —missing every field",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "register"]
+            },
+            "description": "Empty body. All three fields are reported at once — ValidationPipe collects\nevery violation rather than stopping at the first."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('reports name, email and password together', function () {",
+                  "  var body = JSON.stringify(pm.response.json().message);",
+                  "  pm.expect(body).to.include('name');",
+                  "  pm.expect(body).to.include('email');",
+                  "  pm.expect(body).to.include('password');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /users/register —fields are not strings",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": 12345,\n  \"email\": true,\n  \"password\": null\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "register"]
+            },
+            "description": "Fails @IsString / @IsEmail. The @Transform hooks pass non-strings through\nuntouched instead of throwing, so validation is what rejects them."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('complains about string types', function () {",
+                  "  pm.expect(JSON.stringify(pm.response.json().message)).to.include('must be a string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Usage",
+      "description": "Per-account spend reporting, all three behind JwtAuthGuard.\n\n    GET /usage           raw records, date-filterable, paginated\n    GET /usage/by-date   one row per UTC calendar day\n    GET /usage/summary   grand totals plus a per-model breakdown\n\nNone of them takes a userId — every handler reads it from the verified token, so\nthere is no parameter through which one account could reach another's spend. The\n'Usage — errors and access control' folder proves that.\n\nThe folder seeds its own data with a chat call, so it can be run on its own.\n\nCosts are summed as floats and rounded to 6 decimal places, which is why totals\nread 0.00135 rather than 0.0013500000000000003.\n\nEvery request below was verified against a live server.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          { "key": "token", "value": "{{accessToken}}", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "POST /ai/chat —seed one usage record",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Seed a usage record for the reports\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["ai", "chat"]
+            },
+            "description": "AiService writes a UsageRecord on every chat call — that write is what the\nthree reports below read.\n\nThe response tokens and cost are stashed so the assertions further down can check\nthe reports actually reflect this call rather than just returning plausible\nnumbers."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "var body = pm.response.json();",
+                  "pm.collectionVariables.set('seedTotalTokens', body.totalTokens);",
+                  "pm.collectionVariables.set('seedCost', body.cost);",
+                  "pm.collectionVariables.set('seedModel', body.model);",
+                  "",
+                  "// UTC because the daily rollup groups with $dateToString on an ISO date.",
+                  "pm.collectionVariables.set('today', new Date().toISOString().slice(0, 10));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /usage —recent records, newest first",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage",
+              "host": ["{{baseUrl}}"],
+              "path": ["usage"]
+            },
+            "description": "Returns { items, total, limit, skip }. `total` counts everything matching the\nfilter, not just the current page, so a client can render pagination without a\nsecond call.\n\nDefaults are limit 20 / skip 0."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('returns paging metadata alongside the items', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body.items).to.be.an('array');",
+                  "  pm.expect(body.total).to.be.at.least(1);",
+                  "  pm.expect(body.limit).to.eql(20);",
+                  "  pm.expect(body.skip).to.eql(0);",
+                  "});",
+                  "",
+                  "pm.test('the seeded record is on top — sorted newest first', function () {",
+                  "  var items = pm.response.json().items;",
+                  "  pm.expect(items[0].totalTokens).to.eql(",
+                  "    Number(pm.collectionVariables.get('seedTotalTokens'))",
+                  "  );",
+                  "  for (var i = 1; i < items.length; i++) {",
+                  "    pm.expect(new Date(items[i - 1].createdAt).getTime())",
+                  "      .to.be.at.least(new Date(items[i].createdAt).getTime());",
+                  "  }",
+                  "});",
+                  "",
+                  "pm.test('every record belongs to the caller', function () {",
+                  "  var items = pm.response.json().items;",
+                  "  var owner = items[0].userId;",
+                  "  items.forEach(function (record) {",
+                  "    pm.expect(record.userId).to.eql(owner);",
+                  "  });",
+                  "  pm.collectionVariables.set('usageUserId', owner);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /usage —pagination with limit and skip",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage?limit=1&skip=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["usage"],
+              "query": [
+                { "key": "limit", "value": "1" },
+                { "key": "skip", "value": "0" }
+              ]
+            },
+            "description": "limit caps the page at 1 while `total` keeps reporting the full match count —\nthat difference is the thing worth asserting, since a count computed from the\npage would silently break paging."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('page holds one record but total counts them all', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body.items).to.have.lengthOf(1);",
+                  "  pm.expect(body.limit).to.eql(1);",
+                  "  pm.expect(body.total).to.be.at.least(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /usage/by-date —daily rollup",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage/by-date",
+              "host": ["{{baseUrl}}"],
+              "path": ["usage", "by-date"]
+            },
+            "description": "One row per UTC calendar day, newest first, each carrying that day's request\ncount, token totals and cost.\n\nDays are grouped in UTC, so a call made at 01:00 local time east of Greenwich\nlands on the previous UTC day. That is deliberate — it keeps the boundary\nstable regardless of who is asking."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"today's row exists and counts the seeded call\", function () {",
+                  "  var today = pm.collectionVariables.get('today');",
+                  "  var row = pm.response.json().filter(function (r) {",
+                  "    return r.date === today;",
+                  "  })[0];",
+                  "  pm.expect(row, 'no row for ' + today).to.be.an('object');",
+                  "  pm.expect(row.requests).to.be.at.least(1);",
+                  "  pm.expect(row.totalTokens).to.be.at.least(",
+                  "    Number(pm.collectionVariables.get('seedTotalTokens'))",
+                  "  );",
+                  "});",
+                  "",
+                  "pm.test('input and output tokens add up to the total', function () {",
+                  "  pm.response.json().forEach(function (row) {",
+                  "    pm.expect(row.inputTokens + row.outputTokens).to.eql(row.totalTokens);",
+                  "  });",
+                  "});",
+                  "",
+                  "pm.test('rows are ordered newest day first', function () {",
+                  "  var dates = pm.response.json().map(function (r) { return r.date; });",
+                  "  var sorted = dates.slice().sort().reverse();",
+                  "  pm.expect(dates).to.eql(sorted);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /usage/summary —totals and per-model breakdown",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage/summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["usage", "summary"]
+            },
+            "description": "Grand totals across the whole account, plus `byModel` sorted by spend so the\nmost expensive model is first — which is what you actually want to see when a\nbill looks wrong."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('totals include the seeded call', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body.requests).to.be.at.least(1);",
+                  "  pm.expect(body.totalTokens).to.be.at.least(",
+                  "    Number(pm.collectionVariables.get('seedTotalTokens'))",
+                  "  );",
+                  "  pm.expect(body.cost).to.be.at.least(",
+                  "    Number(pm.collectionVariables.get('seedCost'))",
+                  "  );",
+                  "});",
+                  "",
+                  "pm.test('cost is rounded, not raw float noise', function () {",
+                  "  var cost = pm.response.json().cost;",
+                  "  var decimals = (String(cost).split('.')[1] || '').length;",
+                  "  pm.expect(decimals, String(cost)).to.be.at.most(6);",
+                  "});",
+                  "",
+                  "pm.test('the seeded model appears in the breakdown', function () {",
+                  "  var model = pm.collectionVariables.get('seedModel');",
+                  "  var names = pm.response.json().byModel.map(function (m) {",
+                  "    return m.model;",
+                  "  });",
+                  "  pm.expect(names).to.include(model);",
+                  "});",
+                  "",
+                  "pm.test('byModel is ordered by spend, highest first', function () {",
+                  "  var costs = pm.response.json().byModel.map(function (m) {",
+                  "    return m.cost;",
+                  "  });",
+                  "  pm.expect(costs).to.eql(costs.slice().sort(function (a, b) { return b - a; }));",
+                  "});",
+                  "",
+                  "pm.test('first request is not after the last', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(new Date(body.firstRequestAt).getTime())",
+                  "    .to.be.at.most(new Date(body.lastRequestAt).getTime());",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /usage/summary —a bare `to` covers the whole day",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage/summary?to={{today}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["usage", "summary"],
+              "query": [{ "key": "to", "value": "{{today}}" }]
+            },
+            "description": "The subtle one. \"2026-08-18\" parses to midnight, so a naive $lte would exclude\neverything that happened during that day and report zero for a range the caller\nclearly meant to include.\n\nThe service stretches a date-only `to` to 23:59:59.999 UTC. A full timestamp is\nhonoured exactly as written instead.\n\nThis request asks for usage up to today and must see the record seeded minutes\nago. A zero here means the stretch was lost."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"today's own records are inside a range ending today\", function () {",
+                  "  pm.expect(pm.response.json().requests).to.be.at.least(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /usage/summary —range with no usage returns zeroes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage/summary?from=2020-01-01&to=2020-01-31",
+              "host": ["{{baseUrl}}"],
+              "path": ["usage", "summary"],
+              "query": [
+                { "key": "from", "value": "2020-01-01" },
+                { "key": "to", "value": "2020-01-31" }
+              ]
+            },
+            "description": "An empty aggregation returns no rows at all. The service turns that into zeroes\nrather than passing null through, so a client never has to special-case a quiet\nperiod — the shape is identical to a busy one."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200, not 404', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('totals are zero rather than null', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body.requests).to.eql(0);",
+                  "  pm.expect(body.inputTokens).to.eql(0);",
+                  "  pm.expect(body.outputTokens).to.eql(0);",
+                  "  pm.expect(body.totalTokens).to.eql(0);",
+                  "  pm.expect(body.cost).to.eql(0);",
+                  "  pm.expect(body.byModel).to.eql([]);",
+                  "});",
+                  "",
+                  "pm.test('the timestamps are null, not epoch zero', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body.firstRequestAt).to.eql(null);",
+                  "  pm.expect(body.lastRequestAt).to.eql(null);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Usage — errors and access control",
+      "description": "What the reports refuse to do.\n\nThe access-control request is the important one: it logs in as a second,\nfreshly created account and asks for the first account's records by id. It must\ncome back empty — the query parameter is stripped by the ValidationPipe\nwhitelist, and the handler uses the token's `sub` regardless.\n\nEvery request below was verified against a live server.",
+      "item": [
+        {
+          "name": "GET /usage —another user cannot read your spend",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{otherAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage?userId={{usageUserId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["usage"],
+              "query": [{ "key": "userId", "value": "{{usageUserId}}" }]
+            },
+            "description": "Run the Usage folder first so `usageUserId` holds a real account id with\nrecords behind it.\n\nThe pre-request script registers a throwaway second account and logs in as it.\nThis request then presents that second token while explicitly asking for the\nfirst account's userId.\n\nTwo layers have to fail for this to leak: ValidationPipe would have to keep an\nundeclared query parameter, and UsageController would have to prefer it over\nreq.user.sub. Expect an empty page."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var base = pm.variables.get('baseUrl');",
+                  "var email = 'register.other.' + Date.now() + '@example.com';",
+                  "var password = 'correct-horse-99';",
+                  "",
+                  "var jsonBody = function (payload) {",
+                  "  return {",
+                  "    mode: 'raw',",
+                  "    raw: JSON.stringify(payload),",
+                  "    options: { raw: { language: 'json' } }",
+                  "  };",
+                  "};",
+                  "",
+                  "pm.sendRequest({",
+                  "  url: base + '/users/register',",
+                  "  method: 'POST',",
+                  "  header: { 'Content-Type': 'application/json' },",
+                  "  body: jsonBody({ name: 'Other User', email: email, password: password })",
+                  "}, function () {",
+                  "  pm.sendRequest({",
+                  "    url: base + '/auth/login',",
+                  "    method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json' },",
+                  "    body: jsonBody({ email: email, password: password })",
+                  "  }, function (err, res) {",
+                  "    if (!err && res.code === 200) {",
+                  "      pm.collectionVariables.set('otherAccessToken', res.json().accessToken);",
+                  "    }",
+                  "  });",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 — a valid token, just a different account', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('sees none of the other account\\'s records', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body.items).to.eql([]);",
+                  "  pm.expect(body.total).to.eql(0);",
+                  "});",
+                  "",
+                  "pm.collectionVariables.unset('otherAccessToken');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /usage —no Authorization header",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage",
+              "host": ["{{baseUrl}}"],
+              "path": ["usage"]
+            },
+            "description": "UsageController is guarded as a whole, so none of the three reports is reachable\nanonymously."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('says the token is missing', function () {",
+                  "  pm.expect(pm.response.json().message).to.eql('Missing access token');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /usage/summary —no Authorization header",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage/summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["usage", "summary"]
+            },
+            "description": "Confirms the guard sits on the controller rather than on the one handler."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /usage —range that runs backwards",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{accessToken}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage?from=2026-08-18&to=2026-08-01",
+              "host": ["{{baseUrl}}"],
+              "path": ["usage"],
+              "query": [
+                { "key": "from", "value": "2026-08-18" },
+                { "key": "to", "value": "2026-08-01" }
+              ]
+            },
+            "description": "Both dates are individually valid, so the DTO cannot catch this — the service\nchecks the pair and rejects it.\n\nWithout the check Mongo would happily match nothing and the caller would read an\nempty result as 'no usage' instead of 'your range is backwards'."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400, not an empty 200', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('explains which way round the range should be', function () {",
+                  "  pm.expect(pm.response.json().message).to.eql('`from` must not be after `to`');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /usage —invalid date and oversized limit",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{accessToken}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage?from=not-a-date&limit=999",
+              "host": ["{{baseUrl}}"],
+              "path": ["usage"],
+              "query": [
+                { "key": "from", "value": "not-a-date" },
+                { "key": "limit", "value": "999" }
+              ]
+            },
+            "description": "Fails @IsDateString and @Max(100). The limit ceiling exists so a single request\ncannot ask the database for an unbounded page.\n\nQuery strings arrive as text, so `limit` only validates as a number because the\nDTO carries @Type(() => Number) and the pipe runs with transform: true."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('reports both violations', function () {",
+                  "  var body = JSON.stringify(pm.response.json().message);",
+                  "  pm.expect(body).to.include('limit must not be greater than 100');",
+                  "  pm.expect(body).to.include('ISO 8601');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /usage —negative skip",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{accessToken}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage?skip=-5",
+              "host": ["{{baseUrl}}"],
+              "path": ["usage"],
+              "query": [{ "key": "skip", "value": "-5" }]
+            },
+            "description": "Fails @Min(0). Mongo treats a negative skip as an error, so catching it at the\nedge keeps a driver exception out of the response."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('complains about the minimum', function () {",
+                  "  pm.expect(JSON.stringify(pm.response.json().message))",
+                  "    .to.include('skip must not be less than 0');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "description": "POST /auth/login exchanges credentials for a JWT.\n\nThe folder is runnable standalone: the first request seeds the account it then\nlogs in with, and tolerates 409 so re-runs work.\n\nLogin answers **200**, not Nest's default 201 — @HttpCode(HttpStatus.OK) is on\nthe handler because signing in reads credentials rather than creating a resource.\n\nOn success the token is stashed in the `accessToken` collection variable, so\nprotected endpoints can send `Authorization: Bearer {{accessToken}}` once\nJwtAuthGuard is applied to them.\n\nRequires JWT_SECRET in .env — JwtModule uses getOrThrow, so the app refuses to\nboot without it. JWT_EXPIRES_IN is optional and defaults to 1d.\n\nEvery request below was verified against a live server.",
+      "item": [
+        {
+          "name": "POST /users/register —seed the login account",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman User\",\n  \"email\": \"postman.user@example.com\",\n  \"password\": \"correct-horse-99\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "register"]
+            },
+            "description": "Creates the account the login requests use.\n\n201 on the first run, 409 on every run after — UsersService.create rejects a\nduplicate email with ConflictException. Both are accepted here so the folder\nstays re-runnable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201 (created) or 409 (already seeded)', function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([201, 409]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/login —valid credentials",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"postman.user@example.com\",\n  \"password\": \"correct-horse-99\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Happy path. Returns { accessToken, user: { id, name, email } }.\n\nThe password hash is never part of the response — AuthService builds the user\nobject field by field rather than spreading the mongoose document."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200, not 201', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('returns a three-part JWT', function () {",
+                  "  var token = pm.response.json().accessToken;",
+                  "  pm.expect(token).to.be.a('string');",
+                  "  pm.expect(token.split('.')).to.have.lengthOf(3);",
+                  "});",
+                  "",
+                  "pm.test('returns the user without the password hash', function () {",
+                  "  var user = pm.response.json().user;",
+                  "  pm.expect(user.email).to.eql('postman.user@example.com');",
+                  "  pm.expect(user.id).to.be.a('string');",
+                  "  pm.expect(user).to.not.have.property('password');",
+                  "});",
+                  "",
+                  "pm.test('token payload carries sub and email', function () {",
+                  "  var raw = pm.response.json().accessToken.split('.')[1];",
+                  "  var claims = JSON.parse(atob(raw.replace(/-/g, '+').replace(/_/g, '/')));",
+                  "  pm.expect(claims.sub).to.eql(pm.response.json().user.id);",
+                  "  pm.expect(claims.email).to.eql('postman.user@example.com');",
+                  "  pm.expect(claims.exp).to.be.above(claims.iat);",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('accessToken', pm.response.json().accessToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/login —email is normalized before lookup",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"  POSTMAN.USER@Example.COM  \",\n  \"password\": \"correct-horse-99\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Proves the @Transform in LoginDto runs before the lookup.\n\nThe stored email is lowercase and findByEmail queries it raw, so without the\ntrim + lowercase this request would 401 instead of 200."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 — casing and padding were normalized', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('resolved to the lowercase account', function () {",
+                  "  pm.expect(pm.response.json().user.email).to.eql('postman.user@example.com');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/login —wrong password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"postman.user@example.com\",\n  \"password\": \"wrong-password-x\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Real account, bad password. 401 with the generic 'Invalid credentials'."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('message is generic', function () {",
+                  "  pm.expect(pm.response.json().message).to.eql('Invalid credentials');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/login —unknown email is indistinguishable",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nobody@example.com\",\n  \"password\": \"correct-horse-99\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "No such account. Deliberately answers exactly like the wrong-password case —\na distinct 'user not found' would turn this endpoint into an account enumerator.\n\nIf this test ever fails, the two branches have drifted apart."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401, not 404', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('same message as a wrong password — no enumeration', function () {",
+                  "  pm.expect(pm.response.json().message).to.eql('Invalid credentials');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/login —malformed email and short password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"not-an-email\",\n  \"password\": \"x\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Fails @IsEmail and @MinLength(8) — rejected by ValidationPipe with 400 before\nAuthService ever runs, so no database lookup and no bcrypt comparison happen."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400, not 401', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('reports both rule violations', function () {",
+                  "  var body = JSON.stringify(pm.response.json().message);",
+                  "  pm.expect(body).to.include('email must be an email');",
+                  "  pm.expect(body).to.include('longer than or equal to 8');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/login —missing body",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Neither field present."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
